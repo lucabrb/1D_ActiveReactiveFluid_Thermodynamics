@@ -19,10 +19,10 @@ DD = zeros(Float64, 6, 6)
 # We produce a cut of the stability diagram in the plane spanned by two control parameters, Par1 Par2
 # Par1 ∈ [MinPar1, MaxPar1]
 MinPar1 = 0
-MaxPar1 = 10
+MaxPar1 = 50
 # Par2 ∈ [MinPar2, MaxPar2]
 MinPar2 = 0
-MaxPar2 = 10
+MaxPar2 = 50
 NPar1 = 50 # n. of points in the grid of Par1
 NPar2 = 50 # n. of points in the grid of Par2
 ΔPar1 = (MaxPar1 - MinPar1) / NPar1 # grid spacing for Par1
@@ -35,8 +35,8 @@ NPar2 = 50 # n. of points in the grid of Par2
 StabilityDiagram = zeros(Int64, NPar1 + 1, NPar2 + 1)
 
 # Initialize real axis (prerequisite to initialize reciprocal axis)
-L = 10*π
-Nx = 512
+L = 5*π
+Nx = 256
 Δx = L / (Nx - 1)
 # Initialize reciprocal axis
 Kmax = π / Δx
@@ -48,62 +48,63 @@ EigenvStabilityMatrix = zeros(Complex{Float64}, 6, Nk + 1) # Matrix containing t
 
 # This function produces StabilityDiagram
 function StabilityMatrix!(k, k_, D, DD, n, g, c, NPar1, MinPar1, ΔPar1, NPar2, MinPar2, ΔPar2, Nk, EigenvStabilityMatrix, StabilityDiagram)
-    count = 0
     for (i, j) in collect(Iterators.product(1:NPar1+1, 1:NPar2+1))
-    count += 1
-    println("Parameter space pt ", count, " of ", (NPar1+1)*(NPar2+1))
         k[4] = MinPar1 + (i - 1) * ΔPar1
         k[5] = MinPar2 + (j - 1) * ΔPar2
         #Find HSS
         function HSS_system!(F, x)
-            F[1] = - x[1] * (1 + k_[2] * x[2]) + (1 - x[1]) * (k_[1] + k[2] * x[2])
-            F[2] = x[1] * (k[4] * (1-x[2]) - k_[4] * x[2]) + x[3] * (- k[5] * x[2] + k_[5] * (1-x[2]))
-            F[3] = x[1] * (k[3] * (1-x[3]) - k_[3] * x[3]) - k[6] * x[3] + k_[6] * (1-x[3])
+            F[1] = - x[1] * (1 + k_[2] * x[2]) + (n - x[1]) * (k_[1] + k[2] * x[2])
+            F[2] = x[1] * (k[4] * (g - x[2]) - k_[4] * x[2]) + x[3] * (- k[5] * x[2] + k_[5] * (g - x[2]))
+            F[3] = x[1] * (k[3] * (c - x[3]) - k_[3] * x[3]) - k[6] * x[3] + k_[6] * (c - x[3])
         end
         HSS = nlsolve(HSS_system!, [n/2 g/2 c/2]).zero
-        # ∂_t x = D ∂_xx x + R(x) ~ M x; with M = - D q^2 + ∇R
-        # Find ∇R 
-        @variables x[1:6]
-        function R(x)
-            [- x[1] * (1 + k_[2] * x[3]) + x[2] * (k_[1] + k[2] * x[3]),
-            -(- x[1] * (1 + k_[2] * x[3]) + x[2] * (k_[1] + k[2] * x[3])),
-            x[1] * (k[4] * x[4] - k_[4] * x[3]) + x[5] * (- k[5] * x[3] + k_[5] * x[4]),
-            -(x[1] * (k[4] * x[4] - k_[4] * x[3]) + x[5] * (- k[5] * x[3] + k_[5] * x[4])),
-            x[1] * (k[3] * x[6] - k_[3] * x[5]) - k[6] * x[5] + k_[6] * x[6],
-            -(x[1] * (k[3] * x[6] - k_[3] * x[5]) - k[6] * x[5] + k_[6] * x[6])]
-        end
-        ∇R = Symbolics.jacobian(R(x), x[1:6])
-        ∇R_eval = Float64.(Symbolics.value.(
-                            substitute.(∇R, (Dict(
-                                x[1] => HSS[1], 
-                                x[2] => n - HSS[1],
-                                x[3] => HSS[2], 
-                                x[4] => g - HSS[2],
-                                x[5] => HSS[3], 
-                                x[6] => c - HSS[3]),))))
-        # Initialize DD matrix
-        for i in 1:6
-            DD[i,i] = D[i]
-        end
-        # Find eigenvalues of StabilityMatrix at current parameters
-        for p = 1:Nk
-            K = p * Kmin
-            StabilityMatrix = - (K^2) * DD + ∇R_eval
-            EigenvStabilityMatrix[:, p] = eigvals(StabilityMatrix)
-        end
-        # Find eigenvalue with largest real part MaxEigen = MaxEigenvRe + im * MaxEigenvIm
-        MaxEigenvIndex = findmax(real.(EigenvStabilityMatrix))[2] # MaxEigen is the element of StabilityMatrix indexed MaxEigenvIndex[1],MaxEigenvIndex[2]
-        MaxEigenvRe = findmax(real.(EigenvStabilityMatrix))[1]
-        MaxEigenvIm = imag.(EigenvStabilityMatrix[MaxEigenvIndex[1], MaxEigenvIndex[2]])
-        # Entries of StabilityDiagram
-        if MaxEigenvRe > 0
-            if MaxEigenvIm == 0
-                StabilityDiagram[i, j] = 1 # Signals Turing bifurcation
-            else
-                StabilityDiagram[i, j] = 2 # Signals Hopf bifurcation
+        if (0 < HSS[1] < n && 0 < HSS[2] < g && 0 < HSS[3] < c)
+        #    println("WARNING! HSS = ", HSS, " at (k4, k5) = (", k[4], ", ", k[5], ")")
+        #else
+            # ∂_t x = D ∂_xx x + R(x) ~ M x; with M = - D q^2 + ∇R
+            # Find ∇R 
+            @variables y[1:6]
+            function R(y)
+                [- y[1] * (1 + k_[2] * y[3]) + y[2] * (k_[1] + k[2] * y[3]),
+                -(- y[1] * (1 + k_[2] * y[3]) + y[2] * (k_[1] + k[2] * y[3])),
+                y[1] * (k[4] * y[4] - k_[4] * y[3]) + y[5] * (- k[5] * y[3] + k_[5] * y[4]),
+                -(y[1] * (k[4] * y[4] - k_[4] * y[3]) + y[5] * (- k[5] * y[3] + k_[5] * y[4])),
+                y[1] * (k[3] * y[6] - k_[3] * y[5]) - k[6] * y[5] + k_[6] * y[6],
+                -(y[1] * (k[3] * y[6] - k_[3] * y[5]) - k[6] * y[5] + k_[6] * y[6])]
             end
-        else
-            StabilityDiagram[i, j] = 0 # Homogeneous steady state is stable
+            ∇R = Symbolics.jacobian(R(y), y[1:6])
+            ∇R_eval = Float64.(Symbolics.value.(
+                                substitute.(∇R, (Dict(
+                                    y[1] => HSS[1], 
+                                    y[2] => n - HSS[1],
+                                    y[3] => HSS[2], 
+                                    y[4] => g - HSS[2],
+                                    y[5] => HSS[3], 
+                                    y[6] => c - HSS[3]),))))
+            # Initialize DD matrix
+            for i in 1:6
+                DD[i,i] = D[i]
+            end
+            # Find eigenvalues of StabilityMatrix at current parameters
+            for p = 1:Nk
+                K = p * Kmin
+                StabilityMatrix = - (K^2) * DD + ∇R_eval
+                EigenvStabilityMatrix[:, p] = eigvals(StabilityMatrix)
+            end
+            # Find eigenvalue with largest real part MaxEigen = MaxEigenvRe + im * MaxEigenvIm
+            MaxEigenvIndex = findmax(real.(EigenvStabilityMatrix))[2] # MaxEigen is the element of StabilityMatrix indexed MaxEigenvIndex[1],MaxEigenvIndex[2]
+            MaxEigenvRe = findmax(real.(EigenvStabilityMatrix))[1]
+            MaxEigenvIm = imag.(EigenvStabilityMatrix[MaxEigenvIndex[1], MaxEigenvIndex[2]])
+            # Entries of StabilityDiagram
+            if MaxEigenvRe > 0
+                if MaxEigenvIm == 0
+                    StabilityDiagram[i, j] = 1 # Signals Turing bifurcation
+                else
+                    StabilityDiagram[i, j] = 2 # Signals Hopf bifurcation
+                end
+            else
+                StabilityDiagram[i, j] = 0 # Homogeneous steady state is stable
+            end
         end
     end
 end
@@ -133,9 +134,6 @@ end
 StabilityMatrix!(k, k_, D, DD, n, g, c, NPar1, MinPar1, ΔPar1, NPar2, MinPar2, ΔPar2, Nk, EigenvStabilityMatrix, StabilityDiagram)
 TuringLine, HopfLine = BifurcationLines(NPar1, MinPar1, ΔPar1, NPar2, MinPar2, ΔPar2)
 p = scatter(TuringLine[:,1], TuringLine[:,2],
-    xlabel = "P2", ylabel = "P1",
-    xlims = (MinPar2, MaxPar2),
-    ylims = (MinPar1, MaxPar1),
     label = "Turing")
 p = scatter!(HopfLine[:,1], HopfLine[:,2],
     label = "Hopf")
