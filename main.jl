@@ -122,3 +122,11 @@ main(
     MinTimeStep,
     DataFileName
 )
+
+na = load(DataFileName, "na")
+gm = load(DataFileName, "gm")
+cm = load(DataFileName, "cm")
+
+plot(na[1,:], label = "na")
+plot!(gm[1,:], label = "gm")
+plot!(cm[1,:], label = "cm")
