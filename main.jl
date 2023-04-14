@@ -6,6 +6,7 @@ using FFTW
 using JLD
 using Dates
 using NLsolve
+using Roots
 using NumericalIntegration
 
 # Set current directory as working directory
@@ -20,7 +21,7 @@ include("functions.jl")
 include("InputParameters.jl")
 
 function main(Nx, Δx, FrameTimeStep, plotframes, FinalTime, ErrorTolerance, FieldICs, MinTimeStep, DataFileName)
-
+    
     # Set up FFT tools to calculate derivatives
     q = 2*pi*rfftfreq(Nx, 1/Δx)             # Initialize reciprocal grid
     P = plan_rfft(x)                        # When applied to a vector, P calculates its FFT (provided the vector length is length(x))

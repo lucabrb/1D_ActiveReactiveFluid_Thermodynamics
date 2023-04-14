@@ -6,23 +6,23 @@ const Δx = L / (Nx-1)           # Grid spacing
 x = [-L/2 + i*Δx for i = 0:Nx-1]   # Space vector
 
 # Model parameters
-k  = [1.0 1.0 1.0 2 2 1.0] #k1, k2, ... k6
+k  = [0.1 1.0 10 10.0 2.0 1.0] #k1, k2, ... k6
 k_ = [0.0 0.0 0.0 0.0 0.0 0.0] #k-1, k-2, ... k-6
 D  = [0.1 1.0 0.1 1.0 0.01 1.0] #D_na, D_ni, D_gm, D_gc, D_cm, D_cc
-n = 10.0
-g = 10.0
+n = 1.0
+g = 1.0
 c = 1.0
 
 # Homogeneous Steady State (used in initial conditions below)
-# Solving EqnHSS = 0 for Na gives Na at HSS
-
-function HSS_system!(F, x)
-    F[1] = - x[1] * (1 + k_[2] * x[2]) + (n - x[1]) * (k_[1] + k[2] * x[2])
-    F[2] = x[1] * (k[4] * (g - x[2]) - k_[4] * x[2]) + x[3] * (- k[5] * x[2] + k_[5] * (g - x[2]))
-    F[3] = x[1] * (k[3] * (c - x[3]) - k_[3] * x[3]) - k[6] * x[3] + k_[6] * (c - x[3])
-end
-
-HSS = nlsolve(HSS_system!, [n/2 g/2 c/2]).zero
+gm_aux = zeros(Float64, 2)
+HSS    = zeros(Float64, 3)
+#
+gm_eq(x) = (g - x)*((-c*((-n*(k[2]*x + k_[1])*k[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) + k_[6])*k_[5]) / ((n*(k[2]*x + k_[1])*k[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) + (n*(k[2]*x + k_[1])*k_[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) - k[6] - k_[6]) + (-n*(k[2]*x + k_[1])*k[4]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x)) + ((n*(k[2]*x + k_[1])*k_[4]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) + (c*((-n*(k[2]*x + k_[1])*k[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) + k_[6])*k[5]) / ((n*(k[2]*x + k_[1])*k[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) + (n*(k[2]*x + k_[1])*k_[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) - k[6] - k_[6]) - (n + (n*(k[2]*x + k_[1])) / (-k[1] - k_[1] - k[2]*x - k_[2]*x))*k[2])*x
+gm_aux[1] = find_zero(gm_eq, (g/2))
+gm_aux[2] = find_zero(gm_eq, (0,g))
+HSS[2] = maximum(gm_aux)
+HSS[1] = (n*(k[2]*HSS[2] + k_[1])) / (k[1] + k_[1] + k[2]*HSS[2] + k_[2]*HSS[2])
+HSS[3] = (c*(k[3]*HSS[1] + k_[6])) / (k[6] + k_[6] + k[3]*HSS[1] + k_[3]*HSS[1])
 
 # Initial Conditions (HSS + weak noise)
 FieldICs = zeros(Float64, 6, Nx)

@@ -3,15 +3,16 @@ using LinearAlgebra
 using Plots
 using JLD
 using NLsolve
+using Roots
 using Symbolics
 cd(@__DIR__)
 
 # Model parameters
-k  = [1.0 1.0 1.0 1.0 1.0 1.0] #k1, k2, ... k6
+k  = [0.1 1.0 10 1.0 1.0 1.0] #k1, k2, ... k6
 k_ = [0.0 0.0 0.0 0.0 0.0 0.0] #k-1, k-2, ... k-6
 D  = [0.1 1.0 0.1 1.0 0.01 1.0] #D_na, D_ni, D_gm, D_gc, D_cm, D_cc
-n = 10.0
-g = 10.0
+n = 1.0
+g = 1.0
 c = 1.0
 
 DD = zeros(Float64, 6, 6)
@@ -46,65 +47,64 @@ Nk = Int64(floor((Kmax - Kmin) / Kmin))
 StabilityMatrix = zeros(Float64, 6, 6) # This is the matrix M mentioned in the Supplemental Material
 EigenvStabilityMatrix = zeros(Complex{Float64}, 6, Nk + 1) # Matrix containing the three eigenvalues of M (lines), as functions of K (columns)
 
+gm_aux = zeros(Float64, 2)
+HSS    = zeros(Float64, 3)
 # This function produces StabilityDiagram
-function StabilityMatrix!(k, k_, D, DD, n, g, c, NPar1, MinPar1, ΔPar1, NPar2, MinPar2, ΔPar2, Nk, EigenvStabilityMatrix, StabilityDiagram)
+function StabilityMatrix!(gm_aux, HSS, k, k_, D, DD, n, g, c, NPar1, MinPar1, ΔPar1, NPar2, MinPar2, ΔPar2, Nk, EigenvStabilityMatrix, StabilityDiagram)
     for (i, j) in collect(Iterators.product(1:NPar1+1, 1:NPar2+1))
         k[4] = MinPar1 + (i - 1) * ΔPar1
         k[5] = MinPar2 + (j - 1) * ΔPar2
         #Find HSS
-        function HSS_system!(F, x)
-            F[1] = - x[1] * (1 + k_[2] * x[2]) + (n - x[1]) * (k_[1] + k[2] * x[2])
-            F[2] = x[1] * (k[4] * (g - x[2]) - k_[4] * x[2]) + x[3] * (- k[5] * x[2] + k_[5] * (g - x[2]))
-            F[3] = x[1] * (k[3] * (c - x[3]) - k_[3] * x[3]) - k[6] * x[3] + k_[6] * (c - x[3])
+        gm_eq(x) = (g - x)*((-c*((-n*(k[2]*x + k_[1])*k[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) + k_[6])*k_[5]) / ((n*(k[2]*x + k_[1])*k[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) + (n*(k[2]*x + k_[1])*k_[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) - k[6] - k_[6]) + (-n*(k[2]*x + k_[1])*k[4]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x)) + ((n*(k[2]*x + k_[1])*k_[4]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) + (c*((-n*(k[2]*x + k_[1])*k[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) + k_[6])*k[5]) / ((n*(k[2]*x + k_[1])*k[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) + (n*(k[2]*x + k_[1])*k_[3]) / (-k[1] - k_[1] - k[2]*x - k_[2]*x) - k[6] - k_[6]) - (n + (n*(k[2]*x + k_[1])) / (-k[1] - k_[1] - k[2]*x - k_[2]*x))*k[2])*x
+        gm_aux[1] = find_zero(gm_eq, (g/2))
+        gm_aux[2] = find_zero(gm_eq, (0,g))
+        HSS[2] = maximum(gm_aux)
+        HSS[1] = (n*(k[2]*HSS[2] + k_[1])) / (k[1] + k_[1] + k[2]*HSS[2] + k_[2]*HSS[2])
+        HSS[3] = (c*(k[3]*HSS[1] + k_[6])) / (k[6] + k_[6] + k[3]*HSS[1] + k_[3]*HSS[1])
+        # ∂_t x = D ∂_xx x + R(x) ~ M x; with M = - D q^2 + ∇R
+        # Find ∇R 
+        @variables y[1:6]
+        function R(y)
+            [
+            - y[1] * (k[1] + k_[2] * y[3]) + y[2] * (k_[1] + k[2] * y[3]),
+                y[1] * (k[1] + k_[2] * y[3]) - y[2] * (k_[1] + k[2] * y[3]),
+            - y[3] * (k[2] * y[2] + k_[4] * y[1] + k[5] * y[5]) + y[4] * (k[4] * y[1] + k_[5] * y[5]),
+                y[3] * (k[2] * y[2] + k_[4] * y[1] + k[5] * y[5]) - y[4] * (k[4] * y[1] + k_[5] * y[5]),
+            - y[5] * (k[6] + k_[3] * y[1]) + y[6] * (k_[6] + y[1] * k[3]),
+                y[5] * (k[6] + k_[3] * y[1]) - y[6] * (k_[6] + y[1] * k[3])]
         end
-        HSS = nlsolve(HSS_system!, [n/2 g/2 c/2]).zero
-        if (0 < HSS[1] < n && 0 < HSS[2] < g && 0 < HSS[3] < c)
-        #    println("WARNING! HSS = ", HSS, " at (k4, k5) = (", k[4], ", ", k[5], ")")
-        #else
-            # ∂_t x = D ∂_xx x + R(x) ~ M x; with M = - D q^2 + ∇R
-            # Find ∇R 
-            @variables y[1:6]
-            function R(y)
-                [- y[1] * (1 + k_[2] * y[3]) + y[2] * (k_[1] + k[2] * y[3]),
-                -(- y[1] * (1 + k_[2] * y[3]) + y[2] * (k_[1] + k[2] * y[3])),
-                y[1] * (k[4] * y[4] - k_[4] * y[3]) + y[5] * (- k[5] * y[3] + k_[5] * y[4]),
-                -(y[1] * (k[4] * y[4] - k_[4] * y[3]) + y[5] * (- k[5] * y[3] + k_[5] * y[4])),
-                y[1] * (k[3] * y[6] - k_[3] * y[5]) - k[6] * y[5] + k_[6] * y[6],
-                -(y[1] * (k[3] * y[6] - k_[3] * y[5]) - k[6] * y[5] + k_[6] * y[6])]
-            end
-            ∇R = Symbolics.jacobian(R(y), y[1:6])
-            ∇R_eval = Float64.(Symbolics.value.(
-                                substitute.(∇R, (Dict(
-                                    y[1] => HSS[1], 
-                                    y[2] => n - HSS[1],
-                                    y[3] => HSS[2], 
-                                    y[4] => g - HSS[2],
-                                    y[5] => HSS[3], 
-                                    y[6] => c - HSS[3]),))))
-            # Initialize DD matrix
-            for i in 1:6
-                DD[i,i] = D[i]
-            end
-            # Find eigenvalues of StabilityMatrix at current parameters
-            for p = 1:Nk
-                K = p * Kmin
-                StabilityMatrix = - (K^2) * DD + ∇R_eval
-                EigenvStabilityMatrix[:, p] = eigvals(StabilityMatrix)
-            end
-            # Find eigenvalue with largest real part MaxEigen = MaxEigenvRe + im * MaxEigenvIm
-            MaxEigenvIndex = findmax(real.(EigenvStabilityMatrix))[2] # MaxEigen is the element of StabilityMatrix indexed MaxEigenvIndex[1],MaxEigenvIndex[2]
-            MaxEigenvRe = findmax(real.(EigenvStabilityMatrix))[1]
-            MaxEigenvIm = imag.(EigenvStabilityMatrix[MaxEigenvIndex[1], MaxEigenvIndex[2]])
-            # Entries of StabilityDiagram
-            if MaxEigenvRe > 0
-                if MaxEigenvIm == 0
-                    StabilityDiagram[i, j] = 1 # Signals Turing bifurcation
-                else
-                    StabilityDiagram[i, j] = 2 # Signals Hopf bifurcation
-                end
+        ∇R = Symbolics.jacobian(R(y), y[1:6])
+        ∇R_eval = Float64.(Symbolics.value.(
+                            substitute.(∇R, (Dict(
+                                y[1] => HSS[1], 
+                                y[2] => n - HSS[1],
+                                y[3] => HSS[2], 
+                                y[4] => g - HSS[2],
+                                y[5] => HSS[3], 
+                                y[6] => c - HSS[3]),))))
+        # Initialize DD matrix
+        for i in 1:6
+            DD[i,i] = D[i]
+        end
+        # Find eigenvalues of StabilityMatrix at current parameters
+        for p = 1:Nk
+            K = p * Kmin
+            StabilityMatrix = - (K^2) * DD + ∇R_eval
+            EigenvStabilityMatrix[:, p] = eigvals(StabilityMatrix)
+        end
+        # Find eigenvalue with largest real part MaxEigen = MaxEigenvRe + im * MaxEigenvIm
+        MaxEigenvIndex = findmax(real.(EigenvStabilityMatrix))[2] # MaxEigen is the element of StabilityMatrix indexed MaxEigenvIndex[1],MaxEigenvIndex[2]
+        MaxEigenvRe = findmax(real.(EigenvStabilityMatrix))[1]
+        MaxEigenvIm = imag.(EigenvStabilityMatrix[MaxEigenvIndex[1], MaxEigenvIndex[2]])
+        # Entries of StabilityDiagram
+        if MaxEigenvRe > 0
+            if MaxEigenvIm == 0
+                StabilityDiagram[i, j] = 1 # Signals Turing bifurcation
             else
-                StabilityDiagram[i, j] = 0 # Homogeneous steady state is stable
+                StabilityDiagram[i, j] = 2 # Signals Hopf bifurcation
             end
+        else
+            StabilityDiagram[i, j] = 0 # Homogeneous steady state is stable
         end
     end
 end
@@ -131,7 +131,7 @@ function BifurcationLines(NPar1, MinPar1, ΔPar1, NPar2, MinPar2, ΔPar2)
 end
 
 # Calculate instability lines and plot stability diagram
-StabilityMatrix!(k, k_, D, DD, n, g, c, NPar1, MinPar1, ΔPar1, NPar2, MinPar2, ΔPar2, Nk, EigenvStabilityMatrix, StabilityDiagram)
+StabilityMatrix!(gm_aux, HSS, k, k_, D, DD, n, g, c, NPar1, MinPar1, ΔPar1, NPar2, MinPar2, ΔPar2, Nk, EigenvStabilityMatrix, StabilityDiagram)
 TuringLine, HopfLine = BifurcationLines(NPar1, MinPar1, ΔPar1, NPar2, MinPar2, ΔPar2)
 p = scatter(TuringLine[:,1], TuringLine[:,2],
     label = "Turing")
